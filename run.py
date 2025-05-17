@@ -102,7 +102,7 @@ def create_side_by_side(image, depth, grayscale):
         return np.concatenate((image, right_side), axis=1)
 
 
-def run(input_path, output_path, model_path, model_type="dpt_beit_large_512", optimize=False, side=False, height=None,
+def run(input_path, output_path, model_path, model_type="dpt_beit_large_512", optimize=False, side=True, height=None,
         square=False, grayscale=False):
     """Run MonoDepthNN to compute depth maps.
 
@@ -127,8 +127,8 @@ def run(input_path, output_path, model_path, model_type="dpt_beit_large_512", op
 
     # get input
     if input_path is not None:
-        image_names = glob.glob(os.path.join(input_path, "*"))
-        num_images = len(image_names)
+        image_classes = glob.glob(os.path.join(input_path, "*"))
+        num_image_classes = len(image_classes)
     else:
         print("No input path specified. Grabbing images from camera.")
 
@@ -139,33 +139,36 @@ def run(input_path, output_path, model_path, model_type="dpt_beit_large_512", op
     print("Start processing")
 
     if input_path is not None:
-        if output_path is None:
-            print("Warning: No output path specified. Images will be processed but not shown or stored anywhere.")
-        for index, image_name in enumerate(image_names):
+        for index, image_class in enumerate(image_classes):
 
-            print("  Processing {} ({}/{})".format(image_name, index + 1, num_images))
+            print("  Processing {} ({}/{})".format(image_class, index + 1, num_image_classes))
+            output_path = os.path.join(image_class, "prediction")
+            os.makedirs(output_path, exist_ok=True)
+                
+            image_names = glob.glob(os.path.join(image_class, "input", "*"))
+            num_images = len(image_names)
+            
+            for idx, image_name in enumerate(image_names):
+                print("    Processing {} ({}/{})".format(image_name, idx + 1, num_images))
+                # input
+                original_image_rgb = utils.read_image(image_name)  # in [0, 1]
+                image = transform({"image": original_image_rgb})["image"]
 
-            # input
-            original_image_rgb = utils.read_image(image_name)  # in [0, 1]
-            image = transform({"image": original_image_rgb})["image"]
+                # compute
+                with torch.no_grad():
+                    prediction = process(device, model, model_type, image, (net_w, net_h), original_image_rgb.shape[1::-1],
+                                        optimize, False)
 
-            # compute
-            with torch.no_grad():
-                prediction = process(device, model, model_type, image, (net_w, net_h), original_image_rgb.shape[1::-1],
-                                     optimize, False)
-
-            # output
-            if output_path is not None:
-                filename = os.path.join(
-                    output_path, os.path.splitext(os.path.basename(image_name))[0] + '-' + model_type
-                )
-                if not side:
-                    utils.write_depth(filename, prediction, grayscale, bits=2)
-                else:
-                    original_image_bgr = np.flip(original_image_rgb, 2)
-                    content = create_side_by_side(original_image_bgr*255, prediction, grayscale)
-                    cv2.imwrite(filename + ".png", content)
-                utils.write_pfm(filename + ".pfm", prediction.astype(np.float32))
+                # output
+                if output_path is not None:
+                    filename = os.path.join(output_path, os.path.splitext(os.path.basename(image_name))[0])
+                    if not side:
+                        utils.write_depth(filename, prediction, grayscale, bits=2)
+                    else:
+                        original_image_bgr = np.flip(original_image_rgb, 2)
+                        content = create_side_by_side(original_image_bgr*255, prediction, grayscale)
+                        cv2.imwrite(filename + ".png", content)
+                        utils.write_pfm(filename + ".pfm", prediction.astype(np.float32))
 
     else:
         with torch.no_grad():
@@ -234,7 +237,7 @@ if __name__ == "__main__":
                         )
 
     parser.add_argument('-s', '--side',
-                        action='store_true',
+                        default=True,
                         help='Output images contain RGB and depth images side by side'
                         )
 
