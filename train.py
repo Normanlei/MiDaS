@@ -7,6 +7,7 @@ import cv2
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
+from midas_loss import ScaleAndShiftInvariantLoss
 
 class NYUDepthV2Dataset(Dataset):
     def __init__(self, image_dir, transform=None):
@@ -61,8 +62,8 @@ if __name__ == "__main__":
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
     
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-    loss_fn = nn.MSELoss()
-    
+    loss_fn = ScaleAndShiftInvariantLoss()
+
     model.train()
     for epoch in range(EPOCHS):
         total_loss = 0
@@ -83,10 +84,13 @@ if __name__ == "__main__":
                 )
                 .squeeze()
             )
+            # print(depth.min(), depth.max(), depth.dtype)
+            # print("Prediction range:", prediction.min().item(), prediction.max().item())
             # print("Prediction shape: ", prediction.shape)
             # print("Depth shape: ", depth.shape)
             # break
-            loss = loss_fn(prediction, depth)
+            mask = (depth > 0)  
+            loss = loss_fn(prediction, depth, mask)
             loss.backward()
             optimizer.step()
             
@@ -94,6 +98,5 @@ if __name__ == "__main__":
             
             if (i + 1) % 10 == 0:
                 print(f"Epoch [{epoch + 1}/{EPOCHS}], Step [{i + 1}/{len(dataloader)}], Loss: {total_loss / 10:.4f}")
-        break
         print(f"Epoch {epoch+1}: Loss = {total_loss:.4f}")
         torch.save(model.state_dict(), f"midas_finetuned_epoch{epoch+1}.pt")
