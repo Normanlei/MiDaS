@@ -46,8 +46,9 @@ class NYUDepthV2Dataset(Dataset):
 if __name__ == "__main__":
     # Variables
     BATCH_SIZE = 4
-    LEARNING_RATE = 1e-5
-    EPOCHS = 1
+    LEARNING_RATE = 5e-5
+    WEIGHT_DECAY = 0.01
+    EPOCHS = 5
     
     # select device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -61,7 +62,7 @@ if __name__ == "__main__":
     dataset = NYUDepthV2Dataset(image_dir='../../data/official_splits/train', transform=transform)
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     loss_fn = ScaleAndShiftInvariantLoss()
 
     model.train()
@@ -97,6 +98,6 @@ if __name__ == "__main__":
             total_loss += loss.item()
             
             if (i + 1) % 10 == 0:
-                print(f"Epoch [{epoch + 1}/{EPOCHS}], Step [{i + 1}/{len(dataloader)}], Loss: {total_loss / 10:.4f}")
-        print(f"Epoch {epoch+1}: Loss = {total_loss:.4f}")
+                print(f"Epoch [{epoch + 1}/{EPOCHS}], Step [{i + 1}/{len(dataloader)}], Loss: {loss.item():.4f}")
+        print(f"Epoch {epoch+1}: Loss = {total_loss/len(dataloader):.4f}")
         torch.save(model.state_dict(), f"midas_finetuned_epoch{epoch+1}.pt")
