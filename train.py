@@ -1,30 +1,42 @@
-from midas.model_loader import default_models, load_model
 import os
 import glob
 import torch
 import utils
-import cv2
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 import numpy as np
 from midas_loss import ScaleAndShiftInvariantLoss
+from midas.model_loader import default_models, load_model
+from torch.utils.data import ConcatDataset
+import matplotlib.pyplot as plt
+
 
 class NYUDepthV2Dataset(Dataset):
-    def __init__(self, image_dir, transform=None):
-        image_classes = glob.glob(os.path.join(image_dir, "*"))
-        num_image_classes = len(image_classes)
-        all_image_paths = []
-        all_depth_paths = []
-        for index, image_class in enumerate(image_classes):
-             print("  Processing {} ({}/{})".format(image_class, index + 1, num_image_classes))
-             image_names = glob.glob(os.path.join(image_class, "input", "*"))
-             depth_names = glob.glob(os.path.join(image_class, "ground_truth", "*.pfm"))
-             all_image_paths.extend(image_names)
-             all_depth_paths.extend(depth_names)
-        self.image_paths = sorted(all_image_paths)
-        self.depth_paths = sorted(all_depth_paths)
+    def __init__(self, image_dir, ground_truth_base=None, transform=None):
+        self.image_paths = []
+        self.depth_paths = []
         self.transform = transform
 
+        # Get list of scene folders
+        scene_dirs = glob.glob(os.path.join(image_dir, "*"))
+
+        for scene_path in scene_dirs:
+            scene_name = os.path.basename(scene_path)
+            input_dir = os.path.join(scene_path, "input")
+
+            # Ground truth path — mapped to original directory
+            if ground_truth_base:
+                gt_dir = os.path.join(ground_truth_base, scene_name, "ground_truth")
+            else:
+                gt_dir = os.path.join(scene_path, "ground_truth")
+
+            input_images = sorted(glob.glob(os.path.join(input_dir, "*")))
+            depth_maps = sorted(glob.glob(os.path.join(gt_dir, "*.pfm")))
+            print(input_dir, gt_dir)
+            if len(input_images) != len(depth_maps):
+                raise ValueError(f"Image/depth count mismatch in {scene_path}: {len(input_images)} vs {len(depth_maps)}")
+
+            self.image_paths.extend(input_images)
+            self.depth_paths.extend(depth_maps)
 
     def __len__(self):
         return len(self.image_paths)
@@ -32,72 +44,136 @@ class NYUDepthV2Dataset(Dataset):
     def __getitem__(self, idx):
         img = utils.read_image(self.image_paths[idx])
         depth, _ = utils.read_pfm(self.depth_paths[idx])
-        
         if self.transform:
             img = self.transform({"image": img})["image"]
-        
         depth = torch.from_numpy(depth.astype(np.float32))
-        # print("Image shape: ", img.shape)
-        # print("Depth shape: ", depth.shape)
         return img, depth
 
-
-# ---- Main ----
+# --- Main ---
 if __name__ == "__main__":
-    # Variables
     BATCH_SIZE = 4
     LEARNING_RATE = 5e-5
     WEIGHT_DECAY = 0.01
-    EPOCHS = 5
-    
-    # select device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print("Device: %s" % device)
-    
-    # load model
-    model_type = 'dpt_hybrid_384'
-    model, transform, _, _ = load_model(device, default_models[model_type], model_type, optimize=False)
-    print('Model is loaded')
-    
-    dataset = NYUDepthV2Dataset(image_dir='../../data/official_splits/train', transform=transform)
-    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
-    
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-    loss_fn = ScaleAndShiftInvariantLoss()
+    EPOCHS = 10
+    NUM_FOLDS = 5
 
-    model.train()
-    for epoch in range(EPOCHS):
-        total_loss = 0
-        for i, (img, depth) in enumerate(dataloader):
-            img = img.to(device)
-            depth = depth.to(device)
-            target_size = depth.cpu().detach().numpy().shape[1::]
-            # print("Target size: ", target_size)
-                        
-            optimizer.zero_grad()
-            prediction = model.forward(img)
-            prediction = (
-                torch.nn.functional.interpolate(
-                    prediction.unsqueeze(1),
-                    size=target_size,
-                    mode="bicubic",
-                    align_corners=False,
-                )
-                .squeeze()
-            )
-            # print(depth.min(), depth.max(), depth.dtype)
-            # print("Prediction range:", prediction.min().item(), prediction.max().item())
-            # print("Prediction shape: ", prediction.shape)
-            # print("Depth shape: ", depth.shape)
-            # break
-            mask = (depth > 0)  
-            loss = loss_fn(prediction, depth, mask)
-            loss.backward()
-            optimizer.step()
-            
-            total_loss += loss.item()
-            
-            if (i + 1) % 10 == 0:
-                print(f"Epoch [{epoch + 1}/{EPOCHS}], Step [{i + 1}/{len(dataloader)}], Loss: {loss.item():.4f}")
-        print(f"Epoch {epoch+1}: Loss = {total_loss/len(dataloader):.4f}")
-        torch.save(model.state_dict(), f"midas_finetuned_epoch{epoch+1}.pt")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Device:", device)
+
+    model_type = 'dpt_hybrid_384'
+    model_path = default_models[model_type]
+    _, transform, _, _ = load_model(device, model_path, model_type, optimize=False)
+
+    # Load original and augmented datasets
+    print("Loading original and augmented datasets...")
+    # Load original dataset (ground truth is inside)
+    dataset_original = NYUDepthV2Dataset(
+        image_dir='../../data/official_splits/train',
+        transform=transform
+    )
+
+    # Load augmented dataset (depth maps live in the original folder)
+    dataset_augmented = NYUDepthV2Dataset(
+        image_dir='../../data/official_splits_augmented/train',
+        ground_truth_base='../../data/official_splits/train',  # redirect GT
+        transform=transform
+    )
+    # Combine datasets
+    full_dataset = ConcatDataset([dataset_original, dataset_augmented])
+    print(f"Total combined samples: {len(full_dataset)}")
+    
+    num_samples = len(full_dataset)
+    indices = torch.randperm(num_samples).tolist()
+    fold_size = num_samples // NUM_FOLDS
+
+    for fold in range(NUM_FOLDS):
+        print(f"\n🔁 Starting Fold {fold + 1}/{NUM_FOLDS}")
+
+        # Split indices for val/train
+        val_start = fold * fold_size
+        val_end = val_start + fold_size if fold < NUM_FOLDS - 1 else num_samples
+        val_indices = indices[val_start:val_end]
+        train_indices = indices[:val_start] + indices[val_end:]
+
+        # Subsets
+        full_dataset.transform = transform
+        train_subset = Subset(full_dataset, train_indices)
+        val_subset = Subset(full_dataset, val_indices)
+        train_loader = DataLoader(train_subset, batch_size=BATCH_SIZE, shuffle=True)
+        val_loader = DataLoader(val_subset, batch_size=BATCH_SIZE, shuffle=False)
+
+        # Load fresh model per fold
+        model, _, _, _ = load_model(device, model_path, model_type, optimize=False)
+        
+        optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+        loss_fn = ScaleAndShiftInvariantLoss()
+
+        best_val_loss = float('inf')
+        
+        train_losses = []
+        val_losses = []
+
+        for epoch in range(EPOCHS):
+            # --- Train ---
+            model.train()
+            train_loss = 0
+            for img, depth in train_loader:
+                img, depth = img.to(device), depth.to(device)
+                target_size = depth.shape[1:]
+
+                optimizer.zero_grad()
+                prediction = model(img)
+                prediction = torch.nn.functional.interpolate(
+                    prediction.unsqueeze(1), size=target_size, mode="bicubic", align_corners=False
+                ).squeeze()
+
+                mask = (depth > 0)
+                loss = loss_fn(prediction, depth, mask)
+                loss.backward()
+                optimizer.step()
+                train_loss += loss.item()
+
+            avg_train_loss = train_loss / len(train_loader)
+            train_losses.append(avg_train_loss)
+            print(f"📘 Fold {fold + 1}, Epoch {epoch + 1} - Avg Train Loss: {avg_train_loss:.4f}")
+
+            # --- Validate ---
+            model.eval()
+            val_loss = 0
+            with torch.no_grad():
+                for img, depth in val_loader:
+                    img, depth = img.to(device), depth.to(device)
+                    target_size = depth.shape[1:]
+
+                    prediction = model(img)
+                    prediction = torch.nn.functional.interpolate(
+                        prediction.unsqueeze(1), size=target_size, mode="bicubic", align_corners=False
+                    ).squeeze()
+
+                    mask = (depth > 0)
+                    loss = loss_fn(prediction, depth, mask)
+                    val_loss += loss.item()
+
+            avg_val_loss = val_loss / len(val_loader)
+            val_losses.append(avg_val_loss)
+            print(f"🧪 Fold {fold + 1}, Epoch {epoch + 1} - Avg Val Loss: {avg_val_loss:.4f}")
+
+            # --- Save Best Model ---
+            if avg_val_loss < best_val_loss:
+                best_val_loss = avg_val_loss
+                torch.save(model.state_dict(), f"best_model_fold{fold+1}.pt")
+                print(f"✅ Best model updated for Fold {fold+1} at Epoch {epoch+1} with Val Loss: {best_val_loss:.4f}")
+
+            # Save per epoch checkpoint (optional)
+            torch.save(model.state_dict(), f"midas_fold{fold+1}_epoch{epoch+1}.pt")
+        # Plot losses after training each fold
+        plt.figure()
+        plt.plot(range(1, EPOCHS + 1), train_losses, label="Train Loss")
+        plt.plot(range(1, EPOCHS + 1), val_losses, label="Validation Loss")
+        plt.title(f"Loss Curve - Fold {fold + 1}")
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f"loss_curve_fold{fold+1}.png")
+        plt.close()
