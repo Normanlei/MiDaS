@@ -108,3 +108,5 @@ venv.bak/
 *.jpg
 *.jpeg
 *.pt
+
+train_results*

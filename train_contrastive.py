@@ -2,13 +2,14 @@ import os
 import glob
 import torch
 import utils
-from torch.utils.data import Dataset, DataLoader, Subset
+from torch.utils.data import Dataset, DataLoader, Subset, random_split
 import numpy as np
 from midas_loss import ScaleAndShiftInvariantLoss
 from midas.model_loader import default_models, load_model
 from torch.utils.data import ConcatDataset
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
+from tqdm import tqdm
 
 # NOTE:
 # Leverage pretrained features and freeze the encoder, train only the decoder.
@@ -61,73 +62,90 @@ class NYUDepthV2Dataset(Dataset):
 
 # --- Main ---
 if __name__ == "__main__":
-    BATCH_SIZE = 4
+    BATCH_SIZE = 8
     LEARNING_RATE = 5e-5
-    WEIGHT_DECAY = 0.01
+    WEIGHT_DECAY = 1e-4
     EPOCHS = 20
-    NUM_FOLDS = 5
-    REG_CONSISTENCY_TERM = 0.2  # Regularization term for consistency loss
+    REG_CONSISTENCY_TERM = 0.1  # Regularization term for consistency loss
+    TRAINING_RATIO = 0.85
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
 
     model_type = 'dpt_hybrid_384'
     model_path = default_models[model_type]
-    _, transform, _, _ = load_model(device, model_path, model_type, optimize=False)
+    model, transform, _, _ = load_model(device, model_path, model_type, optimize=False)
 
-    # Load original and augmented datasets
-    print("Loading original and augmented datasets...")
-    # Load original dataset (ground truth is inside)
-    full_dataset = NYUDepthV2Dataset(
+    # Load original, augmented, depth_groundtruth datasets
+    print("Loading original, augmented, depth_groundtruth datasets...")
+    dataset = NYUDepthV2Dataset(
         image_dir='../../data/official_splits/train',
         transform=transform
     )
+        
+    train_size = int(TRAINING_RATIO * len(dataset))
+    val_size = len(dataset) - train_size
+    train_subset, val_subset = random_split(dataset, [train_size, val_size])
     
-    num_samples = len(full_dataset)
-    indices = torch.randperm(num_samples).tolist()
-    fold_size = num_samples // NUM_FOLDS
+    train_loader = DataLoader(train_subset, batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(val_subset, batch_size=BATCH_SIZE, shuffle=False)
 
-    for fold in range(NUM_FOLDS):
-        print(f"\n🔁 Starting Fold {fold + 1}/{NUM_FOLDS}")
-
-        # Split indices for val/train
-        val_start = fold * fold_size
-        val_end = val_start + fold_size if fold < NUM_FOLDS - 1 else num_samples
-        val_indices = indices[val_start:val_end]
-        train_indices = indices[:val_start] + indices[val_end:]
-
-        # Subsets
-        # full_dataset.transform = transform
-        train_subset = Subset(full_dataset, train_indices)
-        val_subset = Subset(full_dataset, val_indices)
-        train_loader = DataLoader(train_subset, batch_size=BATCH_SIZE, shuffle=True)
-        val_loader = DataLoader(val_subset, batch_size=BATCH_SIZE, shuffle=False)
-
-        # Load fresh model per fold
-        model, _, _, _ = load_model(device, model_path, model_type, optimize=False)
-         # Freeze encoder (pretrained) parameters
-        print("Freezing encoder parameters...")
-        for name, param in model.pretrained.named_parameters():
-            param.requires_grad = False
-            # print(f"Freeze Parameter: {name}, requires_grad: {param.requires_grad}")
+    # Freeze encoder (pretrained) parameters
+    print("Freezing encoder parameters...")
+    for name, param in model.pretrained.named_parameters():
+        param.requires_grad = False
+        # print(f"Freeze Parameter: {name}, requires_grad: {param.requires_grad}")
         
-        optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-        loss_fn = ScaleAndShiftInvariantLoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=5, eta_min=1e-6)
+    loss_fn = ScaleAndShiftInvariantLoss()
 
-        best_val_loss = float('inf')
-        
-        train_losses = []
-        val_losses = []
+    best_val_loss = float('inf')
+    
+    train_losses = []
+    val_losses = []
 
-        for epoch in range(EPOCHS):
-            # --- Train ---
-            model.train()
-            train_loss = 0
-            for img, augmented_img, depth in train_loader:
+    for epoch in range(EPOCHS):
+        # --- Train ---
+        model.train()
+        train_loss = 0
+        for img, augmented_img, depth in tqdm(train_loader):
+            img, augmented_img, depth = img.to(device), augmented_img.to(device), depth.to(device)
+            target_size = depth.shape[1:]
+
+            prediction = model(img)
+            prediction = torch.nn.functional.interpolate(
+                prediction.unsqueeze(1), size=target_size, mode="bicubic", align_corners=False
+            ).squeeze()
+            
+            augmented_prediction = model(augmented_img)
+            augmented_prediction = torch.nn.functional.interpolate(
+                augmented_prediction.unsqueeze(1), size=target_size, mode="bicubic", align_corners=False
+            ).squeeze()
+            
+            loss_consistency = F.l1_loss(prediction, augmented_prediction)
+            
+            mask = (depth > 0)
+            loss = loss_fn(prediction, depth, mask) + REG_CONSISTENCY_TERM * loss_consistency
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item()
+
+        avg_train_loss = train_loss / len(train_loader)
+        train_losses.append(avg_train_loss)
+        scheduler.step(epoch + 1)
+        print(f"📘 Epoch {epoch + 1} - Avg Train Loss: {avg_train_loss:.4f}")
+
+        # --- Validate ---
+        model.eval()
+        val_loss = 0
+        with torch.no_grad():
+            for img, augmented_img, depth in tqdm(val_loader):
                 img, augmented_img, depth = img.to(device), augmented_img.to(device), depth.to(device)
                 target_size = depth.shape[1:]
 
-                optimizer.zero_grad()
                 prediction = model(img)
                 prediction = torch.nn.functional.interpolate(
                     prediction.unsqueeze(1), size=target_size, mode="bicubic", align_corners=False
@@ -139,61 +157,29 @@ if __name__ == "__main__":
                 ).squeeze()
                 
                 loss_consistency = F.l1_loss(prediction, augmented_prediction)
-                
+
                 mask = (depth > 0)
                 loss = loss_fn(prediction, depth, mask) + REG_CONSISTENCY_TERM * loss_consistency
-                loss.backward()
-                optimizer.step()
-                train_loss += loss.item()
-
-            avg_train_loss = train_loss / len(train_loader)
-            train_losses.append(avg_train_loss)
-            print(f"📘 Fold {fold + 1}, Epoch {epoch + 1} - Avg Train Loss: {avg_train_loss:.4f}")
-
-            # --- Validate ---
-            model.eval()
-            val_loss = 0
-            with torch.no_grad():
-                for img, augmented_img, depth in val_loader:
-                    img, augmented_img, depth = img.to(device), augmented_img.to(device), depth.to(device)
-                    target_size = depth.shape[1:]
-
-                    prediction = model(img)
-                    prediction = torch.nn.functional.interpolate(
-                        prediction.unsqueeze(1), size=target_size, mode="bicubic", align_corners=False
-                    ).squeeze()
-                    
-                    augmented_prediction = model(augmented_img)
-                    augmented_prediction = torch.nn.functional.interpolate(
-                        augmented_prediction.unsqueeze(1), size=target_size, mode="bicubic", align_corners=False
-                    ).squeeze()
-                    
-                    loss_consistency = F.l1_loss(prediction, augmented_prediction)
-
-                    mask = (depth > 0)
-                    loss = loss_fn(prediction, depth, mask) + REG_CONSISTENCY_TERM * loss_consistency
-                    val_loss += loss.item()
+                val_loss += loss.item()
 
             avg_val_loss = val_loss / len(val_loader)
             val_losses.append(avg_val_loss)
-            print(f"🧪 Fold {fold + 1}, Epoch {epoch + 1} - Avg Val Loss: {avg_val_loss:.4f}")
+            print(f"🧪 Epoch {epoch + 1} - Avg Val Loss: {avg_val_loss:.4f}")
 
             # --- Save Best Model ---
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
-                torch.save(model.state_dict(), f"best_model_fold{fold+1}.pt")
-                print(f"✅ Best model updated for Fold {fold+1} at Epoch {epoch+1} with Val Loss: {best_val_loss:.4f}")
-
-            # Save per epoch checkpoint (optional)
-            torch.save(model.state_dict(), f"midas_fold{fold+1}_epoch{epoch+1}.pt")
-        # Plot losses after training each fold
-        plt.figure()
-        plt.plot(range(1, EPOCHS + 1), train_losses, label="Train Loss")
-        plt.plot(range(1, EPOCHS + 1), val_losses, label="Validation Loss")
-        plt.title(f"Loss Curve - Fold {fold + 1}")
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(f"loss_curve_fold{fold+1}.png")
-        plt.close()
+                torch.save(model.state_dict(), f"best_model_epoch{epoch+1}.pt")
+                print(f"✅ Best model updated at Epoch {epoch+1} with Val Loss: {best_val_loss:.4f}")
+            
+    # Plot losses after training each fold
+    plt.figure()
+    plt.plot(range(1, EPOCHS + 1), train_losses, label="Train Loss")
+    plt.plot(range(1, EPOCHS + 1), val_losses, label="Validation Loss")
+    plt.title(f"Loss Curve")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(f"loss_curve.png")
+    plt.close()

@@ -23,6 +23,8 @@ default_models = {
     "midas_v21_384": "weights/midas_v21_384.pt",
     "midas_v21_small_256": "weights/midas_v21_small_256.pt",
     "openvino_midas_v21_small_256": "weights/openvino_midas_v21_small_256.xml",
+    # define the fine-tuned models here
+    "finetuned_norman_fold_4o5_lr_5e5_wd_1e2": "weights/finetuned_norman_fold_4o5_lr_5e5_wd_1e2.pt",
 }
 
 
