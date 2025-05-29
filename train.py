@@ -53,9 +53,9 @@ class NYUDepthV2Dataset(Dataset):
 if __name__ == "__main__":
     BATCH_SIZE = 4
     LEARNING_RATE = 5e-5
-    WEIGHT_DECAY = 0.01
-    EPOCHS = 10
-    NUM_FOLDS = 5
+    WEIGHT_DECAY = 1e-4
+    EPOCHS = 15
+    NUM_FOLDS = 3
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
@@ -175,5 +175,5 @@ if __name__ == "__main__":
         plt.ylabel("Loss")
         plt.legend()
         plt.grid(True)
-        plt.savefig(f"loss_curve_fold{fold+1}.png")
+        plt.savefig(f"figs/loss_curve_fold{fold+1}.png")
         plt.close()
