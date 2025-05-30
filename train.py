@@ -165,7 +165,7 @@ if __name__ == "__main__":
                 print(f"✅ Best model updated for Fold {fold+1} at Epoch {epoch+1} with Val Loss: {best_val_loss:.4f}")
 
             # Save per epoch checkpoint (optional)
-            torch.save(model.state_dict(), f"midas_fold{fold+1}_epoch{epoch+1}.pt")
+            # torch.save(model.state_dict(), f"midas_fold{fold+1}_epoch{epoch+1}.pt")
         # Plot losses after training each fold
         plt.figure()
         plt.plot(range(1, EPOCHS + 1), train_losses, label="Train Loss")
