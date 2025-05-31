@@ -24,7 +24,10 @@ default_models = {
     "midas_v21_small_256": "weights/midas_v21_small_256.pt",
     "openvino_midas_v21_small_256": "weights/openvino_midas_v21_small_256.xml",
     # define the fine-tuned models here
-    "finetuned_norman_fold_4o5_lr_5e5_wd_1e2": "weights/finetuned_norman_fold_4o5_lr_5e5_wd_1e2.pt",
+    "contrast_best_model_epoch9": "weights/contrast_best_model_epoch9.pt",
+    "best_model_fold3": "weights/best_model_fold3.pt",
+    "best_model_fold2": "weights/best_model_fold2.pt",
+    "best_model_fold1": "weights/best_model_fold1.pt",
 }
 
 
@@ -160,6 +163,46 @@ def load_model(device, model_path, model_type="dpt_large_384", optimize=True, he
         normalization = NormalizeImage(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
 
     elif model_type == "dpt_hybrid_384":
+        model = DPTDepthModel(
+            path=model_path,
+            backbone="vitb_rn50_384",
+            non_negative=True,
+        )
+        net_w, net_h = 384, 384
+        resize_mode = "minimal"
+        normalization = NormalizeImage(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    
+    elif model_type == "contrast_best_model_epoch9":
+        model = DPTDepthModel(
+            path=model_path,
+            backbone="vitb_rn50_384",
+            non_negative=True,
+        )
+        net_w, net_h = 384, 384
+        resize_mode = "minimal"
+        normalization = NormalizeImage(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    
+    elif model_type == "best_model_fold3":
+        model = DPTDepthModel(
+            path=model_path,
+            backbone="vitb_rn50_384",
+            non_negative=True,
+        )
+        net_w, net_h = 384, 384
+        resize_mode = "minimal"
+        normalization = NormalizeImage(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    
+    elif model_type == "best_model_fold2":
+        model = DPTDepthModel(
+            path=model_path,
+            backbone="vitb_rn50_384",
+            non_negative=True,
+        )
+        net_w, net_h = 384, 384
+        resize_mode = "minimal"
+        normalization = NormalizeImage(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    
+    elif model_type == "best_model_fold1":
         model = DPTDepthModel(
             path=model_path,
             backbone="vitb_rn50_384",

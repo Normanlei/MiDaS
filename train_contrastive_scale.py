@@ -66,9 +66,12 @@ if __name__ == "__main__":
     BATCH_SIZE = 8
     LEARNING_RATE = 5e-5
     WEIGHT_DECAY = 1e-4
-    EPOCHS = 10
-    REG_CONSISTENCY_TERM = 0.1  # Regularization term for consistency loss
+    EPOCHS = 15
+    REG_CONSISTENCY_TERM = 0.05  # Regularization term for consistency loss
     TRAINING_RATIO = 0.85
+    
+    torch.cuda.empty_cache()
+    torch.cuda.ipc_collect()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
@@ -91,11 +94,11 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_subset, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_subset, batch_size=BATCH_SIZE, shuffle=False)
 
-    # Freeze encoder (pretrained) parameters
-    print("Freezing encoder parameters...")
-    for name, param in model.pretrained.named_parameters():
-        param.requires_grad = False
-        # print(f"Freeze Parameter: {name}, requires_grad: {param.requires_grad}")
+    # # Freeze encoder (pretrained) parameters
+    # print("Freezing encoder parameters...")
+    # for name, param in model.pretrained.named_parameters():
+    #     param.requires_grad = False
+    #     # print(f"Freeze Parameter: {name}, requires_grad: {param.requires_grad}")
         
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=5, eta_min=1e-6)
@@ -133,8 +136,11 @@ if __name__ == "__main__":
             
             loss_consistency = F.l1_loss(prediction_aligned, augmented_prediction_aligned)
             
-            
-            loss = loss_fn(prediction, depth, mask) + REG_CONSISTENCY_TERM * loss_consistency
+            # Apply contrastive loss only after warm-up epochs:
+            if epoch >= 5:
+                loss = loss_fn(prediction, depth, mask) + REG_CONSISTENCY_TERM * loss_consistency
+            else:
+                loss = loss_fn(prediction, depth, mask)
             
             optimizer.zero_grad()
             loss.backward()
