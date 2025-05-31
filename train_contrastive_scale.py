@@ -66,8 +66,8 @@ if __name__ == "__main__":
     BATCH_SIZE = 8
     LEARNING_RATE = 5e-5
     WEIGHT_DECAY = 1e-4
-    EPOCHS = 15
-    REG_CONSISTENCY_TERM = 0.05  # Regularization term for consistency loss
+    EPOCHS = 20
+    REG_CONSISTENCY_TERM = 0.01  # Regularization term for consistency loss
     TRAINING_RATIO = 0.85
     
     torch.cuda.empty_cache()
@@ -93,11 +93,14 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_subset, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_subset, batch_size=BATCH_SIZE, shuffle=False)
 
-    # # Freeze encoder (pretrained) parameters
-    # print("Freezing encoder parameters...")
-    # for name, param in model.pretrained.named_parameters():
-    #     param.requires_grad = False
-    #     # print(f"Freeze Parameter: {name}, requires_grad: {param.requires_grad}")
+    # Freeze encoder (pretrained) parameters and Unfreeze only last 2 transformer blocks
+    print("Freezing partial encoder parameters...")
+    for name, param in model.pretrained.named_parameters():
+        # print(f"Parameter: {name}, requires_grad: {param.requires_grad}")
+        if "blocks.10" in name or "blocks.11" in name:
+            param.requires_grad = True
+        else:
+            param.requires_grad = False
         
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=5, eta_min=1e-6)
