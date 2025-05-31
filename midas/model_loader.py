@@ -28,6 +28,9 @@ default_models = {
     "best_model_fold3": "weights/best_model_fold3.pt",
     "best_model_fold2": "weights/best_model_fold2.pt",
     "best_model_fold1": "weights/best_model_fold1.pt",
+    "no_freeze_contrast_best_model_epoch10": "weights/no_freeze_contrast_best_model_epoch10.pt",
+    "contrast_loss_curve_lr5e-5epoch20decay1e-4reg5e-2": "weights/contrast_loss_curve_lr5e-5epoch20decay1e-4reg5e-2.pt",
+    "contrast_loss_curve_partialfreezelr5e-5epoch20decay1e-4reg1e-2": "weights/contrast_loss_curve_partialfreezelr5e-5epoch20decay1e-4reg1e-2.pt",
 }
 
 
@@ -203,6 +206,36 @@ def load_model(device, model_path, model_type="dpt_large_384", optimize=True, he
         normalization = NormalizeImage(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     
     elif model_type == "best_model_fold1":
+        model = DPTDepthModel(
+            path=model_path,
+            backbone="vitb_rn50_384",
+            non_negative=True,
+        )
+        net_w, net_h = 384, 384
+        resize_mode = "minimal"
+        normalization = NormalizeImage(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    
+    elif model_type == "no_freeze_contrast_best_model_epoch10":
+        model = DPTDepthModel(
+            path=model_path,
+            backbone="vitb_rn50_384",
+            non_negative=True,
+        )
+        net_w, net_h = 384, 384
+        resize_mode = "minimal"
+        normalization = NormalizeImage(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    
+    elif model_type == "contrast_loss_curve_lr5e-5epoch20decay1e-4reg5e-2":
+        model = DPTDepthModel(
+            path=model_path,
+            backbone="vitb_rn50_384",
+            non_negative=True,
+        )
+        net_w, net_h = 384, 384
+        resize_mode = "minimal"
+        normalization = NormalizeImage(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    
+    elif model_type == "contrast_loss_curve_partialfreezelr5e-5epoch20decay1e-4reg1e-2":
         model = DPTDepthModel(
             path=model_path,
             backbone="vitb_rn50_384",

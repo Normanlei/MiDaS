@@ -142,7 +142,7 @@ def run(input_path, output_path, model_path, model_type="dpt_beit_large_512", op
         for index, image_class in enumerate(image_classes):
 
             print("  Processing {} ({}/{})".format(image_class, index + 1, num_image_classes))
-            output_path = os.path.join(image_class, "prediction")
+            output_path = os.path.join(image_class, f"prediction_{model_type}")
             os.makedirs(output_path, exist_ok=True)
                 
             image_names = glob.glob(os.path.join(image_class, "input", "*"))
