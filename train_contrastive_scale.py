@@ -71,7 +71,6 @@ if __name__ == "__main__":
     TRAINING_RATIO = 0.85
     
     torch.cuda.empty_cache()
-    torch.cuda.ipc_collect()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
