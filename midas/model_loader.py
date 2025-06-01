@@ -31,6 +31,9 @@ default_models = {
     "no_freeze_contrast_best_model_epoch10": "weights/no_freeze_contrast_best_model_epoch10.pt",
     "contrast_loss_curve_lr5e-5epoch20decay1e-4reg5e-2": "weights/contrast_loss_curve_lr5e-5epoch20decay1e-4reg5e-2.pt",
     "contrast_loss_curve_partialfreezelr5e-5epoch20decay1e-4reg1e-2": "weights/contrast_loss_curve_partialfreezelr5e-5epoch20decay1e-4reg1e-2.pt",
+    "dropout0.3_contrast_best_model_epoch10": "weights/dropout0.3_contrast_best_model_epoch10.pt",
+    "dropout0.5_contrast_best_model_epoch10": "weights/dropout0.5_contrast_best_model_epoch10.pt",
+    "freeze0-7dropout0.3_contrast_best_model_epoch13": "weights/freeze0-7dropout0.3_contrast_best_model_epoch13.pt",
 }
 
 
@@ -241,6 +244,73 @@ def load_model(device, model_path, model_type="dpt_large_384", optimize=True, he
             backbone="vitb_rn50_384",
             non_negative=True,
         )
+        net_w, net_h = 384, 384
+        resize_mode = "minimal"
+        normalization = NormalizeImage(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    
+    elif model_type == "dropout0.3_contrast_best_model_epoch10":
+        model = DPTDepthModel(
+            path="weights/dpt_hybrid_384.pt",
+            backbone="vitb_rn50_384",
+            non_negative=True,
+        )
+        print("adding dropout to the decoder")
+        DROPOUT_PROB = 0.3
+
+        for name, module in model.scratch.named_children():
+            print(name)
+            if isinstance(module, torch.nn.Conv2d):
+                setattr(
+                    model.scratch,
+                    name,
+                    torch.nn.Sequential(module, torch.nn.Dropout2d(p=DROPOUT_PROB)),
+                )
+        model.load_state_dict(torch.load(model_path))
+
+        net_w, net_h = 384, 384
+        resize_mode = "minimal"
+        normalization = NormalizeImage(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    
+    elif model_type == "dropout0.5_contrast_best_model_epoch10":
+        model = DPTDepthModel(
+            path="weights/dpt_hybrid_384.pt",
+            backbone="vitb_rn50_384",
+            non_negative=True,
+        )
+        print("adding dropout to the decoder")
+        DROPOUT_PROB = 0.5
+
+        for name, module in model.scratch.named_children():
+            print(name)
+            if isinstance(module, torch.nn.Conv2d):
+                setattr(
+                    model.scratch,
+                    name,
+                    torch.nn.Sequential(module, torch.nn.Dropout2d(p=DROPOUT_PROB)),
+                )
+        model.load_state_dict(torch.load(model_path))
+        net_w, net_h = 384, 384
+        resize_mode = "minimal"
+        normalization = NormalizeImage(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    
+    elif model_type == "freeze0-7dropout0.3_contrast_best_model_epoch13":
+        model = DPTDepthModel(
+            path="weights/dpt_hybrid_384.pt",
+            backbone="vitb_rn50_384",
+            non_negative=True,
+        )
+        print("adding dropout to the decoder")
+        DROPOUT_PROB = 0.3
+
+        for name, module in model.scratch.named_children():
+            print(name)
+            if isinstance(module, torch.nn.Conv2d):
+                setattr(
+                    model.scratch,
+                    name,
+                    torch.nn.Sequential(module, torch.nn.Dropout2d(p=DROPOUT_PROB)),
+                )
+        model.load_state_dict(torch.load(model_path))
         net_w, net_h = 384, 384
         resize_mode = "minimal"
         normalization = NormalizeImage(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
